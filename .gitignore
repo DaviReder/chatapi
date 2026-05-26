@@ -1,0 +1,31 @@
+# =====================================================================
+# CPU EMULADOR - GITIGNORE GENERICO C e Windows
+# =====================================================================
+
+# === Arquivos de Projeto do Code::Blocks ===
+*.cbp
+*.layout
+*.depend
+
+# === Diretórios de Compilação Local ===
+bin/
+obj/
+
+# === Binários e Objetos de Compilação (Padrão C) ===
+*.exe
+*.o
+*.obj
+*.out
+*.app
+*.hex
+
+# === Arquivos de Debug e Mapas de Memória do Compilador ===
+*.d
+*.map
+*.pdb
+*.idb
+
+# === Arquivos do Sistema Operacional (Sujeira Oculta) ===
+.DS_Store
+Thumbs.db
+desktop.ini
