@@ -4,51 +4,79 @@
 #include "include/servidor.h"
 #pragma comment(lib, "Ws2_32.lib")
 
-int enviarMensagemS(SOCKET clientSocket){
-    char respostaServidor[1024];
-    printf_s("Servidor: ");
-    fgets(respostaServidor, 1024, stdin); // Lê o que você digitar no servidor
-    respostaServidor[strcspn(respostaServidor, "\r\n")] = 0; // Limpa o enter do texto
+#define MAX_CLIENTES 10
 
-    // Envia para o cliente (incluindo o '\n' gerado pelo fgets) (obs tem que tirar a linha de cima)
-    send(clientSocket, respostaServidor, strlen(respostaServidor), 0);
-    return 0;
-}
+int conexaoAtiva = 1;
+SOCKET clientesConectados[MAX_CLIENTES];
+int totalClientes = 0;
+CRITICAL_SECTION travaListaClientes;
 
-DWORD WINAPI ThreadReceberMSGCliente(LPVOID param){
-    SOCKET clientSocket = (SOCKET)param;
-    char bufferMensagem[1024];
-    int bytesRecebidos;
+// --- PASSO 1: COLOCAR A TRANSMISSÃO NO TOPO ---
+// Movida para cá para que a Thread abaixo saiba que ela existe!
+void transmitirParaTodos(char* mensagem, SOCKET socketOrigem) {
+    EnterCriticalSection(&travaListaClientes);
 
-    while(1){
-        bytesRecebidos = recv(clientSocket, bufferMensagem, sizeof(bufferMensagem) - 1, 0);
-
-        if (bytesRecebidos <= 0) {
-            printf_s("Cliente desconectou.\n");
-            return -1;
-        }
-        bufferMensagem[bytesRecebidos] = '\0';
-        printf_s("\rO cliente disse: %s\nServidor: ", bufferMensagem);
-
-        if (strcmp(bufferMensagem, "sair") == 0) {
-            printf("Encerrando chat a pedido do cliente.\n");
-            return -1;
+    for (int i = 0; i < totalClientes; i++) {
+        if (clientesConectados[i] != socketOrigem) {
+            send(clientesConectados[i], mensagem, strlen(mensagem), 0);
         }
     }
+
+    LeaveCriticalSection(&travaListaClientes);
+}
+
+// --- PASSO 2: A THREAD DE LEITURA DO CLIENTE ---
+DWORD WINAPI ThreadReceberMSGCliente(LPVOID param){
+    SOCKET meuSocket = (SOCKET)param;
+    char buffer[1024];
+    int bytesRecebidos;
+
+    while (1) {
+        bytesRecebidos = recv(meuSocket, buffer, sizeof(buffer) - 1, 0);
+
+        if (bytesRecebidos <= 0 || (bytesRecebidos > 0 && strcmp(buffer, "sair") == 0)) {
+            printf("\n[Sistema] Um cliente desconectou.\n");
+            break;
+        }
+
+        buffer[bytesRecebidos] = '\0';
+
+        // Trocado %d por %llu para sumir o warning do SOCKET
+        printf("\n[Log] Cliente %llu disse: %s", (unsigned long long)meuSocket, buffer);
+        fflush(stdout);
+
+        char mensagemFormatada[1200];
+        sprintf(mensagemFormatada, "[Jogador %llu]: %s", (unsigned long long)meuSocket, buffer);
+        transmitirParaTodos(mensagemFormatada, meuSocket);
+    }
+
+    closesocket(meuSocket);
+
+    EnterCriticalSection(&travaListaClientes);
+    for (int i = 0; i < totalClientes; i++) {
+        if (clientesConectados[i] == meuSocket) {
+            for (int j = i; j < totalClientes - 1; j++) {
+                clientesConectados[j] = clientesConectados[j + 1];
+            }
+            totalClientes--;
+            break;
+        }
+    }
+    LeaveCriticalSection(&travaListaClientes);
+
     return 0;
 }
 
+// --- PASSO 3: FUNÇÃO PRINCIPAL DO SERVIDOR ---
 int criarServidor(){
     printf("Aprendendo Sockets!\n");
 
-    //Inicializa a biblioteca Winsock
     WSADATA wsdata;
     if (WSAStartup(MAKEWORD(2,2), &wsdata) != 0) {
-        printf_s("Falha na inicialização: %d\n", WSAGetLastError());
+        printf_s("Falha na inicializacao: %d\n", WSAGetLastError());
         return 1;
     }
 
-    //Cria o socket
     SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSocket == INVALID_SOCKET) {
         printf_s("Erro ao criar socket: %d\n", WSAGetLastError());
@@ -56,13 +84,11 @@ int criarServidor(){
         return 1;
     }
 
-    // Configura a estrutura de endereço
     struct sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(8080);           // Porta 8080 (htons converte para 'Network Byte Order')
-    serverAddr.sin_addr.s_addr = INADDR_ANY;    // Ouve em qualquer IP disponível na máquina
+    serverAddr.sin_port = htons(8080);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    //Bind -> setar o socket
     int res = bind(listenSocket, (SOCKADDR *)&serverAddr, sizeof(serverAddr));
     if(res == SOCKET_ERROR){
         printf_s("Bind failed with error %u\n", WSAGetLastError());
@@ -70,43 +96,61 @@ int criarServidor(){
         WSACleanup();
         return 1;
     }
-    else
+    else {
         printf("Bind returned success!\n");
+    }
 
-    // A função listen não envia nem recebe dados. Ela apenas muda o estado do socket de "Fechado" para "Escutando".
-    if(listen(listenSocket, 5) == SOCKET_ERROR){
+    if (listen(listenSocket, 5) == SOCKET_ERROR) {
         printf_s("Erro no Listen: %d\n", WSAGetLastError());
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
     }
-    else{
-        printf_s("Servidor ouvindo na porta 8080... Aguardando conexões.\n");
-    }
 
-    // --- PASSO: ACCEPT ---
-    // Precisamos de uma estrutura vazia para guardar os dados de QUEM se conectou
-    struct sockaddr_in clientAddr;
-    int clientAddrSize = sizeof(clientAddr);
-    // Criamos o socket do cliente que vai receber os dados pelo accept().
-    SOCKET clientSocket = accept(listenSocket, (struct sockaddr*)&clientAddr, &clientAddrSize);
+    InitializeCriticalSection(&travaListaClientes);
 
-    if (clientSocket == INVALID_SOCKET) {
-        printf_s("Erro ao aceitar conexão: %d\n", WSAGetLastError());
-    } else {
-        printf_s("Cliente conectado com sucesso!\n\n");
-        HANDLE hThread = CreateThread(NULL, 0, ThreadReceberMSGCliente, (LPVOID)clientSocket, 0, NULL);
-        if(hThread != NULL) CloseHandle(hThread);
+    printf("\nServidor aguardando conexoes na porta 8080...\n");
 
-        // LOOP DO CHAT: Fica rodando enquanto a conexão estiver ativa
-        while (1) {
-            int enviou = enviarMensagemS(clientSocket);
-            if (enviou == -1) break;
+    while (1) {
+        struct sockaddr_in clientAddr;
+        int clientAddrSize = sizeof(clientAddr);
+
+        SOCKET newClient = accept(listenSocket, (struct sockaddr*)&clientAddr, &clientAddrSize);
+
+        if (newClient == INVALID_SOCKET) {
+            printf_s("[Erro] Falha ao aceitar uma nova conexao: %d\n", WSAGetLastError());
+            continue;
         }
+
+        EnterCriticalSection(&travaListaClientes);
+
+        if (totalClientes < MAX_CLIENTES) {
+            clientesConectados[totalClientes] = newClient;
+            totalClientes++;
+
+            // Trocado %d por %llu aqui tambem para o ID do socket
+            printf_s("[Conexao] Novo cliente conectado! Socket ID: %llu (Total: %d/%d)\n",
+                     (unsigned long long)newClient, totalClientes, MAX_CLIENTES);
+
+            // CORRIGIDO: Nome da função alterado para ThreadReceberMSGCliente
+            HANDLE hThread = CreateThread(NULL, 0, ThreadReceberMSGCliente, (LPVOID)newClient, 0, NULL);
+            if (hThread != NULL) {
+                CloseHandle(hThread);
+            }
+        }
+        else {
+            printf_s("[Aviso] Conexao recusada. Servidor lotado!\n");
+            char* msgLotado = "Servidor lotado! Tente novamente mais tarde.\n";
+            send(newClient, msgLotado, strlen(msgLotado), 0);
+            closesocket(newClient);
+        }
+
+        LeaveCriticalSection(&travaListaClientes);
     }
 
-    Sleep(2000);
-
-    closesocket(clientSocket);
+    // Código de limpeza (caso saia do loop algum dia)
     closesocket(listenSocket);
     WSACleanup();
-
+    DeleteCriticalSection(&travaListaClientes);
     return 0;
 }

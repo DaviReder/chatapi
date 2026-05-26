@@ -4,6 +4,8 @@
 #include "include/cliente.h"
 #pragma comment(lib, "Ws2_32.lib")
 
+int clienteAtivo = 1;
+
 int enviarMensagemC(SOCKET socketCliente){
     char mensagem[1024];
 
@@ -11,11 +13,15 @@ int enviarMensagemC(SOCKET socketCliente){
     fgets(mensagem, sizeof(mensagem), stdin);
     mensagem[strcspn(mensagem, "\r\n")] = 0; // Limpa o enter do texto
 
-    // Envia a string inteira de uma vez só
-    send(socketCliente, mensagem, strlen(mensagem), 0);
+    if (!clienteAtivo) {
+        return -1;
+    }
 
-    if (strcmp(mensagem, "sair") == 0) {
-        printf_s("Saindo...\n");
+    // Envia a string inteira de uma vez só
+    int resultado = send(socketCliente, mensagem, strlen(mensagem), 0);
+
+    if (resultado == SOCKET_ERROR || strcmp(mensagem, "sair") == 0) {
+        clienteAtivo = 0;
         return -1;
     }
     return 0;
@@ -26,56 +32,20 @@ DWORD WINAPI ThreadReceberMSGServer(LPVOID param){
     char bufferResposta[1024];
     int bytesRecebidos;
 
-    while(1) {
+    while(clienteAtivo) {
         bytesRecebidos = recv(meuSocket, bufferResposta, sizeof(bufferResposta) - 1, 0);
 
-        if (bytesRecebidos > 0) {
-            bufferResposta[bytesRecebidos] = '\0';
-
-            // Truque visual: \r limpa o "Você: " atual para printar a mensagem do servidor por cima limpa
-            printf_s("\rServidor: %s\nVocê: ", bufferResposta);
-            fflush(stdout); // Força o Windows a desenhar na tela na hora
-
-            if (strcmp(bufferResposta, "sair") == 0) {
-                printf_s("\nO servidor encerrou o chat.\n");
-                break;
+        if (bytesRecebidos <= 0 || (bytesRecebidos > 0 && strcmp(bufferResposta, "sair") == 0)) {
+            if (clienteAtivo) {
+                printf_s("\n\n[Sistema] O servidor encerrou o chat. Aperte ENTER para sair...\n");
+                clienteAtivo = 0;
+                closesocket(meuSocket);
             }
-        }
-        else if (bytesRecebidos == 0) {
-            printf_s("\nConexao encerrada pelo servidor.\n");
             break;
         }
-        else {
-            // Se der erro (ex: socket fechado pelo main), encerra silenciosamente
-            break;
-        }
-    }
-    return 0;
-}
 
-int receberMensagemC(SOCKET socketCliente){
-    char bufferResposta[1024];
-    int bytesRecebidos;
-
-    printf_s("Aguardando resposta do servidor...\n");
-    bytesRecebidos = recv(socketCliente, bufferResposta, sizeof(bufferResposta) - 1, 0);
-
-    if (bytesRecebidos > 0) {
-        bufferResposta[bytesRecebidos] = '\0'; // Garante fechamento da string
-        printf_s("Servidor: %s\n", bufferResposta);
-
-        if (strcmp(bufferResposta, "sair") == 0) {
-            printf_s("O servidor encerrou o chat.\n");
-            return -1;
-        }
-    }
-    else if (bytesRecebidos == 0) {
-        printf_s("O servidor fechou a conexao.\n");
-        return -1;
-    }
-    else {
-        printf_s("Erro ao receber resposta: %d\n", WSAGetLastError());
-        return -1;
+        bufferResposta[bytesRecebidos] = '\0';
+        printf_s("\r%s\nVocê: ", bufferResposta);
     }
     return 0;
 }
@@ -112,12 +82,13 @@ int conectarCli(){
     } else {
         printf_s("Conectado ao servidor com sucesso!\n");
         printf_s("Digite 'sair' para encerrar o chat.\n\n");
+        clienteAtivo = 1;
 
         //Partindo em uma nova THREAD para ler e receber ao mesmo tempo
         HANDLE hThread = CreateThread(NULL, 0, ThreadReceberMSGServer, (LPVOID)meuSocket, 0, NULL);
         if(hThread != NULL) CloseHandle(hThread);
 
-        while (1) {
+        while (clienteAtivo) {
             int enviou = enviarMensagemC(meuSocket);
             if (enviou == -1) {
                 break;

@@ -24,8 +24,3 @@ obj/
 *.map
 *.pdb
 *.idb
-
-# === Arquivos do Sistema Operacional (Sujeira Oculta) ===
-.DS_Store
-Thumbs.db
-desktop.ini
