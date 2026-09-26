@@ -4,7 +4,7 @@ O **ChatAPI** é uma aplicação de chat em tempo real baseada em terminal, dese
 
 ---
 
-## ✨ Funcionalidades
+## Funcionalidades
 
 * **Arquitetura Cliente-Servidor:** Uma única aplicação que pode atuar tanto como servidor (hospedeiro) quanto como cliente.
 * **Múltiplas Conexões Simultâneas:** O servidor suporta até 10 clientes conectados ao mesmo tempo.
@@ -14,14 +14,14 @@ O **ChatAPI** é uma aplicação de chat em tempo real baseada em terminal, dese
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## Tecnologias Utilizadas
 
 * **API de Redes:** Winsock2 (`winsock2.h`) para programação de sockets no Windows.
 * **Biblioteca de Vínculo:** `Ws2_32.lib`.
 
 ---
 
-## 🗂️ Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 ├── include/
@@ -35,7 +35,7 @@ O **ChatAPI** é uma aplicação de chat em tempo real baseada em terminal, dese
 
 ----
 
-## 🚀 Como Executar o Projeto
+## Como Executar o Projeto
 
 Como este projeto utiliza a biblioteca nativa do Windows, ele deve ser compilador e executado obrigatoriamente em ambiente Windows.
 
@@ -59,7 +59,7 @@ O menu inicial controlado pelo main.c exibirá as seguintes opções:
 ```
 
 ---
-## 📈 Próximas Possíveis Melhorias (Roadmap)
+## Próximas Possíveis Melhorias (Roadmap)
 
 - [ ] **Protocolo (JSON):** Detalha a substituição de buffers de strings brutas pela serialização estruturada por meio de objetos JSON (incluindo variáveis de controle como `tipo_evento`, `timestamp`, `nickname` e IDs de origem).
 
